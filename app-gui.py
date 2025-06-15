@@ -1,6 +1,3 @@
-# app_gui_ultimate.py
-
-# --- 1. ІМПОРТИ ---
 import cv2
 import dlib
 import numpy as np
@@ -12,8 +9,9 @@ from tkinter import ttk
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing.image import img_to_array
 from collections import deque, Counter
+import csv
+from datetime import datetime
 
-# --- 2. КОНФІГУРАЦІЯ МОДЕЛЕЙ ---
 MODELS = {
     "heuristic": {"type": "dlib_heuristic", "predictor_path": "./Models/shape_predictor_68_face_landmarks.dat", "description": "Евристичний аналіз лендмарків Dlib."},
     "vgg16": {"type": "keras_cnn", "model_path": "./Models/emotion_vgg16_model.keras", "img_size": (48, 48), "color_mode": "rgb", "labels": {0: 'angry', 1: 'disgust', 2: 'fear', 3: 'happy', 4: 'neutral', 5: 'sad', 6: 'surprise'}, "description": "Згорткова мережа VGG16."},
@@ -21,25 +19,16 @@ MODELS = {
     "rnn": {"type": "keras_rnn", "model_path": "./Models/emotion_cnnlstm_model.keras", "img_size": (48, 48), "color_mode": "grayscale", "labels": {0: 'angry', 1: 'disgust', 2: 'fear', 3: 'happy', 4: 'neutral', 5: 'sad', 6: 'surprise'}, "description": "Комбінована CNN+RNN (LSTM) модель."}
 }
 
-# --- 3. ПАРАМЕТРИ ДЛЯ РЕЖИМУ АДАПТИВНОГО НАВАНТАЖЕННЯ ---
-FPS_ESTIMATE = 20  # Орієнтовна кількість кадрів для розрахунку таймерів
-# Параметри вікна прийняття рішень
-DECISION_BUFFER_SIZE = 100 # Кількість кадрів для аналізу (наприклад, 5 секунд при 20 FPS)
-# Параметри "охолодження" після зміни рівня
+FPS_ESTIMATE = 20
+DECISION_BUFFER_SIZE = 100
 COOLDOWN_SECONDS = 15
 COOLDOWN_FRAMES = COOLDOWN_SECONDS * FPS_ESTIMATE
-# Пороги для прийняття рішень
-NEGATIVE_THRESHOLD = 0.25  # Якщо 25%+ кадрів негативні -> знизити навантаження
-POSITIVE_THRESHOLD = 0.75  # Якщо 75%+ кадрів позитивні/нейтральні -> підвищити
-# Класифікація емоцій для логіки навантаження
+NEGATIVE_THRESHOLD = 0.25
+POSITIVE_THRESHOLD = 0.75
 POSITIVE_NEUTRAL_EMOTIONS = {"happy", "neutral", "surprise"}
 NEGATIVE_STRAIN_EMOTIONS = {"sad", "angry", "fear", "disgust"}
 
-
-# --- 4. ДОПОМІЖНІ ФУНКЦІЇ ---
-
 def recognize_emotion_heuristic(landmarks):
-    # (Код цієї функції залишається без змін, як у попередньому варіанті)
     if landmarks.num_parts != 68: return "Neutral"
     try:
         eye_dist_x = landmarks.part(45).x - landmarks.part(36).x
@@ -57,28 +46,23 @@ def recognize_emotion_heuristic(landmarks):
     return "Neutral"
 
 def draw_performance_metrics(frame, fps, cpu_usage, ram_usage):
-    """Відображає метрики продуктивності (FPS, CPU, RAM)."""
     cv2.putText(frame, f"FPS: {int(fps)}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
     cv2.putText(frame, f"CPU: {cpu_usage:.1f}%", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
     cv2.putText(frame, f"RAM: {ram_usage:.1f}%", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
 def draw_adaptive_load_info(frame, level, decision, cooldown):
-    """Відображає інформацію про рівень навантаження."""
     cv2.putText(frame, f"Difficulty Level: {level}", (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
     cv2.putText(frame, f"Decision: {decision}", (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
     if cooldown > 0:
         cooldown_text = f"Cooldown: {cooldown // FPS_ESTIMATE}s"
         cv2.putText(frame, cooldown_text, (10, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
-
-# --- 5. ОСНОВНА ЛОГІКА ДОДАТКУ ---
-
 def run_application(selected_model_name, is_adaptive_mode):
     config = MODELS[selected_model_name]
     print(f"[INFO] Обрано модель: '{selected_model_name}'. Режим адаптивного навантаження: {'Увімкнено' if is_adaptive_mode else 'Вимкнено'}")
     print(f"[INFO] Завантаження ресурсів...")
     
-    try: # Завантаження моделей
+    try:
         dlib_face_detector = dlib.get_frontal_face_detector()
         dlib_landmark_predictor = keras_emotion_model = None
         if config["type"] == "dlib_heuristic": dlib_landmark_predictor = dlib.shape_predictor(config["predictor_path"])
@@ -93,16 +77,19 @@ def run_application(selected_model_name, is_adaptive_mode):
     prev_time = 0
     process = psutil.Process(os.getpid())
 
-    # Змінні стану
     emotion_history = deque(maxlen=DECISION_BUFFER_SIZE)
     smoothed_emotion = ""
-    # Змінні для адаптивного режиму
     current_level = 3
     cooldown_timer = 0
     last_decision = "Maintain"
+
+    if not os.path.exists('logs'):
+        os.makedirs('logs')
+    log_filename = f"logs/emotion_log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.csv"
+    log_data = []
     
     while True:
-        ret, frame = cap.read();
+        ret, frame = cap.read()
         if not ret: break
 
         cpu_usage = process.cpu_percent(); ram_usage = process.memory_percent()
@@ -111,10 +98,9 @@ def run_application(selected_model_name, is_adaptive_mode):
         current_emotion = "unknown"
 
         if faces:
-            face_rect = faces[0] # Обробляємо лише перше знайдене обличчя
+            face_rect = faces[0]
             x, y, w, h = face_rect.left(), face_rect.top(), face_rect.width(), face_rect.height()
             
-            # --- УНІВЕРСАЛЬНЕ РОЗПІЗНАВАННЯ ЕМОЦІЇ ---
             if config["type"] == "dlib_heuristic":
                 landmarks = dlib_landmark_predictor(gray, face_rect)
                 current_emotion = recognize_emotion_heuristic(landmarks)
@@ -132,8 +118,17 @@ def run_application(selected_model_name, is_adaptive_mode):
             emotion_history.append(current_emotion)
             cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
             cv2.putText(frame, current_emotion, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+        else:
+            emotion_history.append("no_face")
 
-        # --- ЗАСТОСУВАННЯ ЛОГІКИ ЗАЛЕЖНО ВІД РЕЖИМУ ---
+        log_entry = [
+            datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
+            current_emotion,
+            current_level if is_adaptive_mode else 'N/A',
+            last_decision if is_adaptive_mode else 'N/A'
+        ]
+        log_data.append(log_entry)
+            
         if is_adaptive_mode:
             if cooldown_timer > 0: cooldown_timer -= 1
             if cooldown_timer == 0 and len(emotion_history) == DECISION_BUFFER_SIZE:
@@ -155,15 +150,13 @@ def run_application(selected_model_name, is_adaptive_mode):
                 if new_decision_made:
                     cooldown_timer = COOLDOWN_FRAMES
                     print(f"[DECISION] {last_decision} Load to Level {current_level}")
-                emotion_history.clear() # Очищуємо буфер після прийняття рішення
+                emotion_history.clear()
             draw_adaptive_load_info(frame, current_level, last_decision, cooldown_timer)
         else:
-            # Логіка для звичайного режиму (згладжена емоція)
             if len(emotion_history) > 0:
                 smoothed_emotion = Counter(emotion_history).most_common(1)[0][0]
                 cv2.putText(frame, f"Smoothed: {smoothed_emotion}", (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
-        # Відображення метрик продуктивності (завжди)
         curr_time = time.time()
         fps = 1 / (curr_time - prev_time) if prev_time > 0 else 0
         prev_time = curr_time
@@ -172,11 +165,19 @@ def run_application(selected_model_name, is_adaptive_mode):
         cv2.imshow("Ultimate Emotion Recognition System", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'): break
 
+    print(f"[INFO] Завершення сесії. Збереження лог-файлу у {log_filename}...")
+    try:
+        with open(log_filename, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['timestamp', 'detected_emotion', 'difficulty_level', 'decision'])
+            writer.writerows(log_data)
+        print("[INFO] Лог-файл успішно збережено.")
+    except Exception as e:
+        print(f"[ERROR] Не вдалося зберегти лог-файл: {e}")
+
     cap.release()
     cv2.destroyAllWindows()
 
-
-# --- 6. ГРАФІЧНИЙ ІНТЕРФЕЙС (GUI) ---
 if __name__ == "__main__":
     root = tk.Tk()
     root.title("Налаштування запуску")
