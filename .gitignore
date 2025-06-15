@@ -1,0 +1,9 @@
+fer2013/
+
+Models/*.keras
+Models/*.h5
+
+fer-2013/test
+fer-2013/test/angry/*.jpg
+
+Training*
