@@ -9,8 +9,8 @@ import numpy as np
 from sklearn.metrics import classification_report, confusion_matrix
 
 IMG_WIDTH, IMG_HEIGHT = 48, 48
-TRAIN_DATA_DIR = 'fer2013/train'
-VALIDATION_DATA_DIR = 'fer2013/test'
+TRAIN_DATA_DIR = 'fer-2013/train'
+VALIDATION_DATA_DIR = 'fer-2013/test'
 BATCH_SIZE = 64
 NUM_CLASSES = 7
 EPOCHS = 50

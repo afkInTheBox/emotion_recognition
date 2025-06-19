@@ -8,8 +8,8 @@ batch_size = 64
 num_classes = 7
 epochs = 50
 
-train_data_dir = 'fer2013/train'
-validation_data_dir = 'fer2013/test'
+train_data_dir = 'fer-2013/train'
+validation_data_dir = 'fer-2013/test'
 
 train_datagen = ImageDataGenerator(
     rescale=1./255,
